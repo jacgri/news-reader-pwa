@@ -1,7 +1,10 @@
 class NewsController {
   constructor () {
     this._newsSections = []
+    this._db = this._initDb()
 
+    this._registerServiceWorker()
+    this._getArticlesFromDb()
     this._getArticles()
   }
 
@@ -14,13 +17,17 @@ class NewsController {
       throw new Error(`Couldn't connect to the server`)
     })
     .then(responseJson => {
-      this._categoriseNews(responseJson.response.results)
-      this._updateDOM()
+      const articles = responseJson.response.results
+      
+      this._cacheArticles(articles)
+      this._getArticlesFromDb()
     })
     .catch(error => console.log(error))
   }
 
   _categoriseNews (articles) {
+    this._newsSections = []
+
     articles.forEach(article => {
       const exisitingNewsSection = this._newsSections.find(newsSection => {
         return newsSection.title === article.sectionName
@@ -60,6 +67,55 @@ class NewsController {
         </a>
         `
       })
+    })
+  }
+
+  _registerServiceWorker () {
+    if (navigator.serviceWorker) {
+      navigator.serviceWorker.register('../service-worker.js')
+      .then((register) => {
+        console.log('[Service Worker] Registered')
+      })
+    }
+  }
+
+  _initDb () {
+    return new Promise(resolve => {
+      const dbOpen = indexedDB.open('test-db', 1)
+
+      dbOpen.onupgradeneeded = () => {
+        const database = dbOpen.result
+
+        const articleStore = database.createObjectStore('articles', { keypath: 'id' })
+        articleStore.createIndex('by_id', 'id', { unique: true })
+      }
+      dbOpen.onsuccess = () => {
+        const database = dbOpen.result
+
+        resolve(database)
+      }
+    })
+  }
+
+  _cacheArticles (articles) {
+    this._db
+    .then(database => {
+      const articlesStore = database.transaction('articles', 'readwrite').objectStore('articles')
+
+      articles.forEach(article => articlesStore.put(article))
+    })
+  }
+
+  _getArticlesFromDb () {
+    this._db
+    .then(database => {
+      const articlesStore = database.transaction('articles').objectStore('articles')
+      const articlesQuery = articlesStore.index('by_id').getAll()
+
+      articlesQuery.onsuccess = () => {
+        this._categoriseNews(articlesQuery.result)
+        this._updateDOM()
+      }
     })
   }
 }
